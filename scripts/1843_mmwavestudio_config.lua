@@ -36,7 +36,7 @@ RX_GAIN = 30 -- dB
 START_CHIRP_TX = 0
 END_CHIRP_TX = 2 -- 2 for 1843
 NUM_FRAMES = 0 -- Set this to 0 to continuously stream data
-CHIRP_LOOPS = 128 --    //32
+CHIRP_LOOPS = 182 --    //32
 PERIODICITY = 70 -- ms  //30
 -----------------------------------------------------------
 

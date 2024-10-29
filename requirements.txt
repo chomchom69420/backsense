@@ -6,3 +6,4 @@ matplotlib
 pyserial
 scikit_learn
 opencv-python
+scipy
