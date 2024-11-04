@@ -11,7 +11,7 @@ def save_adc_data_to_bin(adc_data, description):
     formatted_date_time = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
 
     # Create the filename based on current date, time, and description
-    filename = f"{formatted_date_time}_{description}.bin"
+    filename = f"D:\\dataset\\{formatted_date_time}_{description}.bin"
 
     # Save adc_data to a binary file
     adc_data.tofile(filename)

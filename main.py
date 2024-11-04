@@ -23,8 +23,13 @@ import matplotlib.animation as animation
 
 plt.close('all')
 
+#Filename
+fname = "2024-11-04_16-26-46_0_30cm_block"
+# fname = "2024-11-04_16-42-23_surrounding3"
+
 # QOL settings
 loadData = True
+loadData_surr = False
 
 numFrames = 100
 numADCSamples = 256
@@ -41,15 +46,16 @@ numAngleBins = 64
 caponAngleRes = 1 #degrees
 caponAngleRange = 90
 numCaponAngleBins = (caponAngleRange * 2) // caponAngleRes + 1
-rangeBinStartProcess = 0
-rangeBinEndProcess = 10
+rangeBinStartProcess = 11
+rangeBinEndProcess = 20
 numRangeBinsProcessed = rangeBinEndProcess - rangeBinStartProcess + 1
 
 range_resolution, bandwidth = dsp.range_resolution(numADCSamples, dig_out_sample_rate=4400, freq_slope_const=60.012)
+max_range = dsp.max_range(dig_out_sample_rate=4400, freq_slope_const=60.012)
+
 doppler_resolution = dsp.doppler_resolution(bandwidth)
 
-targetRangeAzimuth1D = 25  #in cm 
-targetRangeBin = targetRangeAzimuth1D//(range_resolution*100)
+targetRangeBin = 5
 
 plotRangeAzimuth = True
 plotAzimuth1D = False
@@ -59,9 +65,9 @@ plot2DscatterXZ = False
 plot3Dscatter = False  
 plotCustomPlt = False
 
-plotMakeMovie = True
+plotMakeMovie = False
 makeMovieTitle = " "
-makeMovieDirectory = "./test_plotRangeAzimuth.mp4"
+makeMovieDirectory = "./range_angle.mp4"
 
 visTrigger = plot2DscatterXY + plot2DscatterXZ + plot3Dscatter + plotRangeDopp + plotCustomPlt + plotRangeAzimuth + plotAzimuth1D
 assert visTrigger < 2, "Can only choose to plot one type of plot at once"
@@ -96,13 +102,20 @@ if __name__ == '__main__':
 
     # (1) Reading in adc data
     if loadData:
-        adc_data = np.fromfile('./dataset/2024-10-26_11-51-24_back_0_deg_50_cm.bin', dtype=np.uint16)
+        adc_data = np.fromfile(f"./dataset/{fname}.bin", dtype=np.uint16)
         adc_data = adc_data.reshape(numFrames, -1)
         adc_data = np.apply_along_axis(DCA1000.organize, 1, adc_data, num_chirps=numChirpsPerFrame,
                                        num_rx=numRxAntennas, num_samples=numADCSamples)
         print(f'adc_data shape: {adc_data.shape}')
         print("Data Loaded!")
-
+        
+    if loadData_surr:
+        adc_data_surr = np.fromfile('./dataset/2024-11-01_16-01-35_surrounding1.bin', dtype=np.uint16)
+        adc_data_surr = adc_data_surr.reshape(numFrames, -1)
+        adc_data_surr = np.apply_along_axis(DCA1000.organize, 1, adc_data_surr, num_chirps=numChirpsPerFrame,
+                                       num_rx=numRxAntennas, num_samples=numADCSamples)
+        print("Surrounding Data Loaded!")
+        
     # (1.5) Required Plot Declarations
     if plot2DscatterXY or plot2DscatterXZ:
         fig, axes = plt.subplots(1, 2)
@@ -118,8 +131,8 @@ if __name__ == '__main__':
         # Set up y and x ticks only once
         y_ticks = list(range(0, numCaponAngleBins * caponAngleRes, 15))
         y_labels = [str(j - caponAngleRange // caponAngleRes) for j in y_ticks]
-        x_ticks = list(range(rangeBinStartProcess, rangeBinEndProcess + 1))
-        x_labels = [str(j) for j in x_ticks]
+        x_ticks = list(range(0, numRangeBinsProcessed, int(np.ceil(0.1*numRangeBinsProcessed))))
+        x_labels = [str(j+rangeBinStartProcess) for j in x_ticks]
 
         ax.set_yticks(y_ticks)
         ax.set_yticklabels(y_labels)
@@ -133,7 +146,7 @@ if __name__ == '__main__':
     # (1.6) Optional single frame view
     if singFrameView:
         dataCube = np.zeros((1, numChirpsPerFrame, 4, 128), dtype=complex)
-        dataCube[0, :, :, :] = adc_data[299]
+        dataCube[0, :, :, :] = adc_data[99]
     else:
         dataCube = adc_data
 
@@ -141,10 +154,17 @@ if __name__ == '__main__':
     range_azimuth_all_frames = np.zeros((numCaponAngleBins, numRangeBinsProcessed, adc_data.shape[0]))
     num_vec, steering_vec = dsp.gen_steering_vec(ang_est_range=caponAngleRange, ang_est_resolution=caponAngleRes, num_ant=numVirtAntennas)
     
+    # ---- Load surrounding range azimuth
+    if loadData_surr:
+        range_azimuth_surr = np.zeros((numCaponAngleBins, numRangeBinsProcessed))
+    
     for i, frame in enumerate(dataCube):
-#        print(i,end=',') # Frame tracker
         # (2) Range Processing
         from mmwave.dsp.utils import Window
+        
+        if loadData_surr:
+            frame_surr = adc_data_surr[i,:,:,:]
+            radar_cube_surr = dsp.range_processing(frame_surr, window_type_1d=Window.HANNING)
 
         radar_cube = dsp.range_processing(frame, window_type_1d=Window.HANNING)
         assert radar_cube.shape == (
@@ -154,26 +174,49 @@ if __name__ == '__main__':
         beamWeights   = np.zeros((numVirtAntennas, numRangeBinsProcessed), dtype=np.complex_)
         radar_cube_aoa = np.concatenate((radar_cube[0::3, ...], radar_cube[1::3, ...], radar_cube[2::3, ...]), axis=1)
         
+        if loadData_surr:
+            radar_cube_aoa_surr = np.concatenate((radar_cube_surr[0::3, ...], radar_cube_surr[1::3, ...], radar_cube_surr[2::3, ...]), axis=1)
+        
         # Note that when replacing with generic doppler estimation functions, radarCube is interleaved and
         # has doppler at the last dimension.
         for k in range(numRangeBinsProcessed):
             j = k + rangeBinStartProcess
-            range_azimuth[:,j], beamWeights[:,j] = dsp.aoa_capon(radar_cube_aoa[:, :, j].T, steering_vec, magnitude=True)
+            range_azimuth[:,k], beamWeights[:,k] = dsp.aoa_capon(radar_cube_aoa[:, :, j].T, steering_vec, magnitude=True)
+            
+            # --- Store range azimuth for surrounding
+            if loadData_surr:
+                range_azimuth_surr[:,k], _ = dsp.aoa_capon(radar_cube_aoa_surr[:, :, j].T, steering_vec, magnitude=True)
             
         #Store the range_azimuths for plotting later 
         if plotRangeAzimuth and plotMakeMovie:
-            range_azimuth[:, :5] = 0
+            if rangeBinStartProcess == 0 and rangeBinEndProcess>5:
+                range_azimuth[:, :5] = 0
+            
+            if loadData_surr:
+                range_azimuth_surr[:,:5]=0
+                range_azimuth = np.absolute(range_azimuth - range_azimuth_surr)
+            
             range_azimuth_all_frames[:,:,i] = range_azimuth
+            
         
         # --- Plot range azimuth
         if plotRangeAzimuth and not plotMakeMovie:
-            range_azimuth[:, :5] = 0
+            if rangeBinStartProcess == 0 and rangeBinEndProcess>5:
+                range_azimuth[:, :5] = 0
+            
+            # --- Plot surrounding-removed range-azimuth
+            if loadData_surr:
+                range_azimuth_surr[:,:5]=0
+                range_azimuth = np.absolute(range_azimuth - range_azimuth_surr)
+            
             for coll in ax.collections:
                 coll.remove()  
             ax.set_title(f"Range-Azimuth plot {i}")
             if i==0:
                 #Initially, plot the heatmap without the cbar and then add the cbar manually
-                img = ax.imshow(range_azimuth, aspect="auto", interpolation="nearest", animated=True)
+                img = ax.imshow(range_azimuth, aspect="auto", interpolation="nearest", animated=True
+                                # ,vmax=4.5e9
+                                )
                 fig.colorbar(img, ax=ax, orientation="vertical")
             else:
                 img.set_data(range_azimuth)
@@ -190,7 +233,7 @@ if __name__ == '__main__':
                 ims.append(plt.plot(range_azimuth[:, int(targetRangeBin)-rangeBinStartProcess], 'blue'))
                 continue
 
-            plt.plot(range_azimuth[:, 9])
+            plt.plot(range_azimuth[:, targetRangeBin])
             plt.pause(0.1)
             plt.clf()
 
@@ -387,8 +430,8 @@ if __name__ == '__main__':
             print("Making movie for Range Azimuth...")
             Writer = animation.writers['pillow']
             writer = Writer(fps=10, metadata=dict(artist='Me'), bitrate=1800) 
-            img = ax.imshow(range_azimuth_all_frames[:,:,0], aspect="auto", interpolation="nearest", animated=True)
+            img = ax.imshow(range_azimuth_all_frames[:,:,0], aspect="auto", interpolation="nearest", animated=True, vmin=0, vmax=4.5e9)
             fig.colorbar(img, ax=ax, orientation="vertical")
             ani = animation.FuncAnimation(fig, update, frames=range_azimuth_all_frames.shape[-1], interval=50, blit=True, fargs=(range_azimuth_all_frames,img))
-            ani.save("range-azimuth.gif", writer=writer)
+            ani.save(f"ra_{fname}.gif", writer=writer)
             print("Complete")

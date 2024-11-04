@@ -35,6 +35,22 @@ def range_resolution(num_adc_samples, dig_out_sample_rate=4400, freq_slope_const
 
     return range_resolution, band_width
 
+def max_range(dig_out_sample_rate=4400, freq_slope_const = 60.012):
+    """ Calculate the maximum detectable range for the given radar configuration
+
+    Args:
+        dig_out_sample_rate (int): The ADC sample rate (in kHz)
+        freq_slope_const (float): The slope of the freq increase in each chirp (in MHz/usec)
+
+    Returns:
+        max_range (float): maximum range in meters
+    """
+    
+    light_speed_meter_per_sec = 299792458
+    freq_slope_m_hz_per_usec = freq_slope_const
+    max_range = ( light_speed_meter_per_sec * ( 1000*dig_out_sample_rate ) ) / ( 2*freq_slope_m_hz_per_usec*1e12 )
+    
+    return max_range
 
 def range_processing(adc_data, window_type_1d=None, axis=-1):
     """Perform 1D FFT on complex-format ADC data.
