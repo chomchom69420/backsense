@@ -11,6 +11,7 @@
 # ==============================================================================
 
 import sys
+import gc
 import numpy as np
 import mmwave.dsp as dsp
 import mmwave.clustering as clu
@@ -24,20 +25,22 @@ import matplotlib.animation as animation
 plt.close('all')
 
 #Filename
-fname = "2024-11-04_16-26-46_0_30cm_block"
-# fname = "2024-11-04_16-42-23_surrounding3"
+fname = "2024-11-04_16-16-02_surrounding1"
+fname_surr = "2024-11-04_16-42-23_surrounding3"
 
 # QOL settings
 loadData = True
 loadData_surr = False
 
-numFrames = 100
+numFrames = 50
 numADCSamples = 256
 numTxAntennas = 3
 numRxAntennas = 4
 numLoopsPerFrame = 182
 numChirpsPerFrame = numTxAntennas * numLoopsPerFrame
 numVirtAntennas = numTxAntennas * numRxAntennas
+frameTime = 150 #ms
+movieFPS = 1000/frameTime
 
 numRangeBins = numADCSamples
 numDopplerBins = numLoopsPerFrame
@@ -46,8 +49,8 @@ numAngleBins = 64
 caponAngleRes = 1 #degrees
 caponAngleRange = 90
 numCaponAngleBins = (caponAngleRange * 2) // caponAngleRes + 1
-rangeBinStartProcess = 11
-rangeBinEndProcess = 20
+rangeBinStartProcess = 0
+rangeBinEndProcess = 10
 numRangeBinsProcessed = rangeBinEndProcess - rangeBinStartProcess + 1
 
 range_resolution, bandwidth = dsp.range_resolution(numADCSamples, dig_out_sample_rate=4400, freq_slope_const=60.012)
@@ -55,24 +58,28 @@ max_range = dsp.max_range(dig_out_sample_rate=4400, freq_slope_const=60.012)
 
 doppler_resolution = dsp.doppler_resolution(bandwidth)
 
-targetRangeBin = 5
+targetRangeBin = 8
+targetAzimuthBin = 74
 
-plotRangeAzimuth = True
+plotRangeAzimuth = False
 plotAzimuth1D = False
+plotRangeAzimuthTimeSeries = True
 plotRangeDopp = False  
 plot2DscatterXY = False  
 plot2DscatterXZ = False  
 plot3Dscatter = False  
 plotCustomPlt = False
 
+plotSurroundingRemoved = False
 plotMakeMovie = False
 makeMovieTitle = " "
 makeMovieDirectory = "./range_angle.mp4"
 
-visTrigger = plot2DscatterXY + plot2DscatterXZ + plot3Dscatter + plotRangeDopp + plotCustomPlt + plotRangeAzimuth + plotAzimuth1D
+visTrigger = plot2DscatterXY + plot2DscatterXZ + plot3Dscatter + plotRangeDopp + plotCustomPlt + plotRangeAzimuth + plotAzimuth1D + plotRangeAzimuthTimeSeries
 assert visTrigger < 2, "Can only choose to plot one type of plot at once"
 
 singFrameView = False
+singFrameNumber = 40
 
 #For plotting AxesImage objects (imshow)
 def update(frame, data, img):
@@ -99,6 +106,7 @@ def movieMaker(fig, ims, title, save_dir):
 if __name__ == '__main__':
     ims = []
     max_size = 0
+    ra_timeSeries = []
 
     # (1) Reading in adc data
     if loadData:
@@ -110,7 +118,7 @@ if __name__ == '__main__':
         print("Data Loaded!")
         
     if loadData_surr:
-        adc_data_surr = np.fromfile('./dataset/2024-11-01_16-01-35_surrounding1.bin', dtype=np.uint16)
+        adc_data_surr = np.fromfile(f"./dataset/{fname_surr}.bin", dtype=np.uint16)
         adc_data_surr = adc_data_surr.reshape(numFrames, -1)
         adc_data_surr = np.apply_along_axis(DCA1000.organize, 1, adc_data_surr, num_chirps=numChirpsPerFrame,
                                        num_rx=numRxAntennas, num_samples=numADCSamples)
@@ -127,28 +135,55 @@ if __name__ == '__main__':
     elif plotRangeDopp:
         fig = plt.figure()
     elif plotRangeAzimuth:
-        fig, ax= plt.subplots()
         # Set up y and x ticks only once
         y_ticks = list(range(0, numCaponAngleBins * caponAngleRes, 15))
         y_labels = [str(j - caponAngleRange // caponAngleRes) for j in y_ticks]
         x_ticks = list(range(0, numRangeBinsProcessed, int(np.ceil(0.1*numRangeBinsProcessed))))
         x_labels = [str(j+rangeBinStartProcess) for j in x_ticks]
-
-        ax.set_yticks(y_ticks)
-        ax.set_yticklabels(y_labels)
-        ax.set_xticks(x_ticks)
-        ax.set_xticklabels(x_labels, rotation=45, ha="right")
+        
+        if loadData_surr:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,5))
+            ax1.set_yticks(y_ticks)
+            ax1.set_yticklabels(y_labels)
+            ax1.set_xticks(x_ticks)
+            ax1.set_xticklabels(x_labels, rotation=45, ha="right")
+            ax2.set_yticks(y_ticks)
+            ax2.set_yticklabels(y_labels)
+            ax2.set_xticks(x_ticks)
+            ax2.set_xticklabels(x_labels, rotation=45, ha="right")
+            ax1.set_title("back radar")
+            ax2.set_title("surrounding")
+        else:
+            fig, ax= plt.subplots()
+            ax.set_yticks(y_ticks)
+            ax.set_yticklabels(y_labels)
+            ax.set_xticks(x_ticks)
+            ax.set_xticklabels(x_labels, rotation=45, ha="right")
     elif plotAzimuth1D:
+        x_ticks = list(range(0, numCaponAngleBins, 10))
+        x_labels = [str((j - caponAngleRange//caponAngleRes)*caponAngleRes) for j in x_ticks] 
+        if loadData_surr:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,5)) 
+            for ax in [ax1, ax2]:
+                ax.set_xticks(x_ticks)
+                ax.set_xticklabels(x_labels)
+            ax1.set_title("back radar")
+            ax2.set_title("surrounding")
+        else:
+            fig, ax = plt.subplots()
+            plt.xticks(ticks=x_ticks, labels=x_labels)
+    elif plotRangeAzimuthTimeSeries:
         fig, ax = plt.subplots()
     elif plotCustomPlt:
         print("Using Custom Plotting")
 
     # (1.6) Optional single frame view
-    if singFrameView:
-        dataCube = np.zeros((1, numChirpsPerFrame, 4, 128), dtype=complex)
-        dataCube[0, :, :, :] = adc_data[99]
-    else:
-        dataCube = adc_data
+    # if singFrameView:
+    #     dataCube = np.zeros((1, numChirpsPerFrame, 4, 128), dtype=complex)
+    #     dataCube[0, :, :, :] = adc_data[numFrames-1]
+    # else:
+    #     dataCube = adc_data
+    dataCube = adc_data
 
     range_azimuth = np.zeros((numCaponAngleBins, numRangeBinsProcessed))
     range_azimuth_all_frames = np.zeros((numCaponAngleBins, numRangeBinsProcessed, adc_data.shape[0]))
@@ -186,8 +221,12 @@ if __name__ == '__main__':
             # --- Store range azimuth for surrounding
             if loadData_surr:
                 range_azimuth_surr[:,k], _ = dsp.aoa_capon(radar_cube_aoa_surr[:, :, j].T, steering_vec, magnitude=True)
+                
+        # --- Append timeseries values
+        if plotRangeAzimuthTimeSeries:
+            ra_timeSeries.append(range_azimuth[targetAzimuthBin, targetRangeBin])
             
-        #Store the range_azimuths for plotting later 
+        # --- Store the range_azimuths for plotting later 
         if plotRangeAzimuth and plotMakeMovie:
             if rangeBinStartProcess == 0 and rangeBinEndProcess>5:
                 range_azimuth[:, :5] = 0
@@ -197,7 +236,6 @@ if __name__ == '__main__':
                 range_azimuth = np.absolute(range_azimuth - range_azimuth_surr)
             
             range_azimuth_all_frames[:,:,i] = range_azimuth
-            
         
         # --- Plot range azimuth
         if plotRangeAzimuth and not plotMakeMovie:
@@ -206,36 +244,79 @@ if __name__ == '__main__':
             
             # --- Plot surrounding-removed range-azimuth
             if loadData_surr:
-                range_azimuth_surr[:,:5]=0
-                range_azimuth = np.absolute(range_azimuth - range_azimuth_surr)
+                if rangeBinStartProcess == 0 and rangeBinEndProcess>5:
+                    range_azimuth_surr[:,:5]=0
+                # range_azimuth = np.absolute(range_azimuth - range_azimuth_surr)
             
-            for coll in ax.collections:
-                coll.remove()  
-            ax.set_title(f"Range-Azimuth plot {i}")
-            if i==0:
-                #Initially, plot the heatmap without the cbar and then add the cbar manually
-                img = ax.imshow(range_azimuth, aspect="auto", interpolation="nearest", animated=True
-                                # ,vmax=4.5e9
-                                )
-                fig.colorbar(img, ax=ax, orientation="vertical")
+            if loadData_surr:
+                for ax in [ax1, ax2]:
+                    for coll in ax.collections:
+                        coll.remove() 
             else:
-                img.set_data(range_azimuth)
+                for coll in ax.collections:
+                    coll.remove()  
+                    
+            fig.suptitle(f"Range-Azimuth plot {i}")
             
-            plt.pause(0.1)
+            if i==0:                
+                if loadData_surr:
+                    im1 = ax1.imshow(range_azimuth, aspect="auto", interpolation="nearest", animated=True)
+                    im2 = ax2.imshow(range_azimuth_surr, aspect="auto", interpolation="nearest", animated=True)
+                    cbar1 = fig.colorbar(im1,ax=ax1, orientation='vertical')
+                    cbar2 = fig.colorbar(im2,ax=ax2, orientation='vertical')
+                else:
+                    img = ax.imshow(range_azimuth, aspect="auto", interpolation="nearest", animated=True)
+                    ax.set_xlabel("Range bin")
+                    ax.set_ylabel("Angle")
+                    fig.colorbar(img, ax=ax, orientation="vertical")
+            else:
+                if loadData_surr:
+                    im1.set_data(range_azimuth)
+                    im2.set_data(range_azimuth_surr)
+                else:
+                    img.set_data(range_azimuth)
+                    
+            if singFrameView and i == singFrameNumber:
+                # Save the current figure and exit
+                plt.savefig(f"results\\imgs\\ra_{fname}_{i}.pdf", dpi=300)
+                plt.close('all')
+                gc.collect()
+                sys.exit()
+            
+            if not singFrameView:    
+                plt.pause(frameTime/1000)   
         
         # --- Plot range azimuth 1D for particular range bin
         if plotAzimuth1D:
-            x_ticks = list(range(0, numCaponAngleBins, 10))
-            x_labels = [str((j - caponAngleRange//caponAngleRes)*caponAngleRes) for j in x_ticks] 
-            plt.xticks(ticks=x_ticks, labels=x_labels)
             
             if plotMakeMovie:
                 ims.append(plt.plot(range_azimuth[:, int(targetRangeBin)-rangeBinStartProcess], 'blue'))
                 continue
-
-            plt.plot(range_azimuth[:, targetRangeBin])
-            plt.pause(0.1)
-            plt.clf()
+            
+            if loadData_surr:
+                line1, = ax1.plot(range_azimuth[:, targetRangeBin], 'blue')
+                line2, = ax2.plot(range_azimuth_surr[:, targetRangeBin], 'blue')
+            else:
+                plt.plot(range_azimuth[:, targetRangeBin])
+                plt.xticks(ticks=x_ticks, labels=x_labels)
+                plt.xlabel("Angle (degrees)")
+                plt.ylabel("Power from capon beamforming")
+            
+            if singFrameView and i == singFrameNumber:
+                # Save the current figure and exit
+                plt.savefig(f"results\\imgs\\azimuth1d_{fname}_{i}.pdf", dpi=300)
+                plt.close('all')
+                gc.collect()
+                sys.exit()
+            
+            if not singFrameView:
+                plt.pause(frameTime/1000)
+            
+            if loadData_surr:
+                line1.remove()
+                line2.remove()
+            else:
+                plt.clf()
 
         # # (3) Doppler Processing 
         # det_matrix, aoa_input = dsp.doppler_processing(radar_cube, num_tx_antennas=3, clutter_removal_enabled=False, window_type_2d=Window.HAMMING)
@@ -356,6 +437,9 @@ if __name__ == '__main__':
         if plotAzimuth1D:
             continue
         
+        if plotRangeAzimuthTimeSeries:
+            continue
+
         if plot2DscatterXY or plot2DscatterXZ:
 
             if plot2DscatterXY:
@@ -422,6 +506,13 @@ if __name__ == '__main__':
         else:
             sys.exit("Unknown plot options.")
 
+    if plotRangeAzimuthTimeSeries:
+        plt.plot(ra_timeSeries)
+        plt.title(f"Power time series for (range, azimuth) = ({targetRangeBin}, {targetAzimuthBin})")
+        plt.xlabel("Frame number")
+        plt.ylabel("Power")
+        plt.savefig(f"results\\imgs\\ra_timeseries_{fname}_{i}.pdf", dpi=300)
+    
     if visTrigger and plotMakeMovie:
         if not plotRangeAzimuth:
             print("Making movie...")
@@ -430,8 +521,8 @@ if __name__ == '__main__':
             print("Making movie for Range Azimuth...")
             Writer = animation.writers['pillow']
             writer = Writer(fps=10, metadata=dict(artist='Me'), bitrate=1800) 
-            img = ax.imshow(range_azimuth_all_frames[:,:,0], aspect="auto", interpolation="nearest", animated=True, vmin=0, vmax=4.5e9)
+            img = ax.imshow(range_azimuth_all_frames[:,:,0], aspect="auto", interpolation="nearest", animated=True)
             fig.colorbar(img, ax=ax, orientation="vertical")
             ani = animation.FuncAnimation(fig, update, frames=range_azimuth_all_frames.shape[-1], interval=50, blit=True, fargs=(range_azimuth_all_frames,img))
-            ani.save(f"ra_{fname}.gif", writer=writer)
+            ani.save(f"results\\gifs\\ra_{fname}.gif", writer=writer)
             print("Complete")
