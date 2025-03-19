@@ -102,6 +102,7 @@ else
 end
 RSTD.Sleep(1000)
 
+-- We can disable all Tx using: ar1.ChanNAdcConfig(0, 0, 0, 1, 1, 1, 1, 2, 1, 0)
 -- Channel Config
 if (ar1.ChanNAdcConfig(1, 1, 1, 1, 1, 1, 1, 2, 1, 0) == 0) then
     WriteToLog("ChanNAdcConfig Success\n", "green")
