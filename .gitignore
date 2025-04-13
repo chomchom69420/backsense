@@ -19,6 +19,10 @@ __pycache__/
 data/
 .DS_Store
 
+Set*/
+parser_scripts/*.bin
+parser_scripts/*.txt
+parser_scripts/*.csv
 
 **/.eggs/
 
